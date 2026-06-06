@@ -1,22 +1,37 @@
 import streamlit as st
 import pandas as pd
+import json
+import os
 
 st.title("Acompanhamento de Estudos 📚")
 st.write("Bem-vindo ao seu painel de controle de estudos!")
 
-if 'historico' not in st.session_state:
-    st.session_state['historico'] = []
-
-if 'editais' not in st.session_state:
-    st.session_state['editais'] = {
-        "Concurso Polícia": {
-            "Direito Penal": ["Crimes contra a pessoa", "Crimes contra o patrimônio"],
-            "Constitucional": ["Direitos Fundamentais"]
-        },
-        "Pós-Graduação": {
-            "Módulo Básico": ["Física Aplicada", "Anatomia"]
+# --- NOVIDADE: FUNÇÕES PARA SALVAR E LER OS DADOS REAIS ---
+# 1. Carregar Editais Salvos
+if os.path.exists("meus_editais.json"):
+    with open("meus_editais.json", "r") as f:
+        st.session_state['editais'] = json.load(f)
+else:
+    if 'editais' not in st.session_state:
+        st.session_state['editais'] = {
+            "Concurso Polícia": {
+                "Direito Penal": ["Crimes contra a pessoa", "Crimes contra o patrimônio"]
+            }
         }
-    }
+
+# 2. Carregar Histórico Salvo
+if os.path.exists("meu_historico.csv"):
+    df_salvo = pd.read_csv("meu_historico.csv")
+    st.session_state['historico'] = df_salvo.to_dict('records')
+else:
+    if 'historico' not in st.session_state:
+        st.session_state['historico'] = []
+
+# 3. Função Mágica para gravar no arquivo toda vez que houver mudança
+def gravar_arquivos():
+    with open("meus_editais.json", "w") as f:
+        json.dump(st.session_state['editais'], f)
+    pd.DataFrame(st.session_state['historico']).to_csv("meu_historico.csv", index=False)
 
 # --- GAVETA DE GERENCIAMENTO ---
 with st.expander("⚙️ Gerenciar Editais, Matérias e Tópicos"):
@@ -25,6 +40,7 @@ with st.expander("⚙️ Gerenciar Editais, Matérias e Tópicos"):
     if st.button("Criar Edital"):
         if novo_edital and novo_edital not in st.session_state['editais']:
             st.session_state['editais'][novo_edital] = {} 
+            gravar_arquivos() # Salva no arquivo!
             st.success(f"Edital '{novo_edital}' criado!")
             st.rerun()
             
@@ -38,6 +54,7 @@ with st.expander("⚙️ Gerenciar Editais, Matérias e Tópicos"):
         if st.button("Adicionar Matéria"):
             if nova_materia and nova_materia not in st.session_state['editais'][edital_para_materia]:
                 st.session_state['editais'][edital_para_materia][nova_materia] = []
+                gravar_arquivos() # Salva no arquivo!
                 st.success("Matéria adicionada!")
                 st.rerun()
                 
@@ -52,6 +69,7 @@ with st.expander("⚙️ Gerenciar Editais, Matérias e Tópicos"):
             if st.button("Adicionar Tópico"):
                 if novo_topico and novo_topico not in st.session_state['editais'][edital_para_topico][materia_alvo]:
                     st.session_state['editais'][edital_para_topico][materia_alvo].append(novo_topico)
+                    gravar_arquivos() # Salva no arquivo!
                     st.success("Tópico adicionado!")
                     st.rerun()
         else:
@@ -66,13 +84,13 @@ edital_escolhido = st.selectbox("1. Qual Edital/Projeto você estudou hoje?", li
 materias_do_edital = list(st.session_state['editais'][edital_escolhido].keys())
 
 if len(materias_do_edital) == 0:
-    st.warning("⚠️ Você precisa cadastrar pelo menos uma matéria neste edital lá em cima para começar a registrar.")
+    st.warning("⚠️ Você precisa cadastrar pelo menos uma matéria neste edital.")
 else:
     disciplina_escolhida = st.selectbox("2. Qual disciplina?", materias_do_edital)
     topicos_disponiveis = st.session_state['editais'][edital_escolhido][disciplina_escolhida]
     
     if len(topicos_disponiveis) == 0:
-        st.warning("⚠️ Você precisa cadastrar pelo menos um tópico nesta matéria lá em cima.")
+        st.warning("⚠️ Você precisa cadastrar pelo menos um tópico nesta matéria.")
     else:
         topico = st.selectbox("3. Qual tópico exato?", topicos_disponiveis)
         
@@ -98,27 +116,24 @@ else:
                 "Acertos": acertos,
                 "Erros": erros
             })
+            
+            gravar_arquivos() # Salva no arquivo!
+            
             st.success("Boa! Estudo registrado e salvo com sucesso.")
             st.rerun()
 
-# --- NOVIDADE: DASHBOARD DE DESEMPENHO E HISTÓRICO ---
+# --- DASHBOARD DE DESEMPENHO E HISTÓRICO ---
 if len(st.session_state['historico']) > 0:
     st.divider()
-    
-    # Transforma o histórico em uma tabela do Pandas para fazermos os cálculos
     df = pd.DataFrame(st.session_state['historico'])
     
     st.header("📈 Dashboard de Desempenho")
-    
-    # Filtra apenas os registros que tiveram questões (para evitar erro de divisão por zero caso você só leia a teoria)
     df_questoes = df[df['Questões'] > 0]
     
     if not df_questoes.empty:
-        # Agrupa por disciplina e soma o total de questões e acertos
         resumo = df_questoes.groupby('Disciplina')[['Questões', 'Acertos']].sum().reset_index()
         resumo['Aproveitamento'] = (resumo['Acertos'] / resumo['Questões']) * 100
         
-        # Mostra o desempenho de cada matéria com barras e alertas
         for index, row in resumo.iterrows():
             disciplina = row['Disciplina']
             taxa = row['Aproveitamento']
@@ -128,24 +143,24 @@ if len(st.session_state['historico']) > 0:
                 st.write(f"**{disciplina}**")
                 st.write(f"{row['Acertos']} / {row['Questões']} acertos")
             with col_barra:
-                # O st.progress exige um número entre 0.0 e 1.0, por isso dividimos por 100
-                st.progress(int(taxa) / 100)
+                st.progress(min(int(taxa) / 100, 1.0)) # Trava para a barra não passar de 100%
                 
-            # Os alertas inteligentes baseados na porcentagem
             if taxa < 70:
-                st.warning(f"🚨 **Alerta de Revisão:** Seu aproveitamento está em {taxa:.1f}%. Recomendamos focar mais em {disciplina}!")
+                st.warning(f"🚨 **Alerta:** Seu aproveitamento está em {taxa:.1f}%. Recomendamos revisar {disciplina}!")
             elif taxa >= 90:
-                st.success(f"🏆 **Excelente!** Você está dominando {disciplina} com {taxa:.1f}% de acerto.")
+                st.success(f"🏆 **Excelente!** Dominando com {taxa:.1f}%.")
             else:
-                st.info(f"👍 **Bom desempenho!** Taxa de {taxa:.1f}% em {disciplina}. Continue assim.")
-                
-            st.write("---") # Linha para separar as matérias visualmente
-    else:
-        st.info("Faça registros com questões para ver suas estatísticas de acerto aqui.")
+                st.info(f"👍 **Bom!** Taxa de {taxa:.1f}%.")
+            st.write("---")
 
     st.subheader("Seu Histórico de Estudos 📊")
-    st.caption("💡 Dica: Dê um duplo clique para editar. Para excluir, selecione a caixinha à esquerda e clique na lixeira.")
+    st.caption("💡 Para excluir, apague os dados da linha na tabela.")
     
     tabela = df[["Edital", "Disciplina", "Tópico", "Horas", "Minutos", "Questões", "Acertos", "Erros"]]
     tabela_editada = st.data_editor(tabela, use_container_width=True, num_rows="dynamic")
-    st.session_state['historico'] = tabela_editada.to_dict('records')
+    
+    # Se a tabela for editada manualmente pelo usuário, salva as mudanças!
+    if tabela_editada.to_dict('records') != st.session_state['historico']:
+        st.session_state['historico'] = tabela_editada.to_dict('records')
+        gravar_arquivos()
+        st.rerun()
