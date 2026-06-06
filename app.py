@@ -59,13 +59,12 @@ with st.expander("⚙️ Gerenciar Editais, Matérias e Tópicos"):
 
 st.divider()
 
-# --- ÁREA DE REGISTRO DE ESTUDOS (Agora sem o st.form!) ---
+# --- ÁREA DE REGISTRO DE ESTUDOS ---
 st.subheader("📝 Registrar Estudo Diário")
 
 edital_escolhido = st.selectbox("1. Qual Edital/Projeto você estudou hoje?", list(st.session_state['editais'].keys()))
 materias_do_edital = list(st.session_state['editais'][edital_escolhido].keys())
 
-# O código verifica se tem matérias antes de mostrar o resto
 if len(materias_do_edital) == 0:
     st.warning("⚠️ Você precisa cadastrar pelo menos uma matéria neste edital lá em cima para começar a registrar.")
 else:
@@ -86,7 +85,6 @@ else:
         questoes_feitas = st.number_input("Total de Questões", min_value=0)
         erros = st.number_input("Quantos erros?", min_value=0)
         
-        # Botão normal do Streamlit (substituiu o st.form_submit_button)
         if st.button("Salvar Estudo", type="primary"):
             acertos = questoes_feitas - erros
             
@@ -101,16 +99,53 @@ else:
                 "Erros": erros
             })
             st.success("Boa! Estudo registrado e salvo com sucesso.")
-            st.rerun() # Recarrega a tela para atualizar a tabela na hora!
+            st.rerun()
 
+# --- NOVIDADE: DASHBOARD DE DESEMPENHO E HISTÓRICO ---
 if len(st.session_state['historico']) > 0:
     st.divider()
+    
+    # Transforma o histórico em uma tabela do Pandas para fazermos os cálculos
+    df = pd.DataFrame(st.session_state['historico'])
+    
+    st.header("📈 Dashboard de Desempenho")
+    
+    # Filtra apenas os registros que tiveram questões (para evitar erro de divisão por zero caso você só leia a teoria)
+    df_questoes = df[df['Questões'] > 0]
+    
+    if not df_questoes.empty:
+        # Agrupa por disciplina e soma o total de questões e acertos
+        resumo = df_questoes.groupby('Disciplina')[['Questões', 'Acertos']].sum().reset_index()
+        resumo['Aproveitamento'] = (resumo['Acertos'] / resumo['Questões']) * 100
+        
+        # Mostra o desempenho de cada matéria com barras e alertas
+        for index, row in resumo.iterrows():
+            disciplina = row['Disciplina']
+            taxa = row['Aproveitamento']
+            
+            col_nome, col_barra = st.columns([1, 2])
+            with col_nome:
+                st.write(f"**{disciplina}**")
+                st.write(f"{row['Acertos']} / {row['Questões']} acertos")
+            with col_barra:
+                # O st.progress exige um número entre 0.0 e 1.0, por isso dividimos por 100
+                st.progress(int(taxa) / 100)
+                
+            # Os alertas inteligentes baseados na porcentagem
+            if taxa < 70:
+                st.warning(f"🚨 **Alerta de Revisão:** Seu aproveitamento está em {taxa:.1f}%. Recomendamos focar mais em {disciplina}!")
+            elif taxa >= 90:
+                st.success(f"🏆 **Excelente!** Você está dominando {disciplina} com {taxa:.1f}% de acerto.")
+            else:
+                st.info(f"👍 **Bom desempenho!** Taxa de {taxa:.1f}% em {disciplina}. Continue assim.")
+                
+            st.write("---") # Linha para separar as matérias visualmente
+    else:
+        st.info("Faça registros com questões para ver suas estatísticas de acerto aqui.")
+
     st.subheader("Seu Histórico de Estudos 📊")
+    st.caption("💡 Dica: Dê um duplo clique para editar. Para excluir, selecione a caixinha à esquerda e clique na lixeira.")
     
-    st.info("💡 Dica: Dê um duplo clique para editar. Para excluir, selecione a caixinha à esquerda e clique na lixeira.")
-    
-    tabela = pd.DataFrame(st.session_state['historico'])
-    tabela = tabela[["Edital", "Disciplina", "Tópico", "Horas", "Minutos", "Questões", "Acertos", "Erros"]]
-    
+    tabela = df[["Edital", "Disciplina", "Tópico", "Horas", "Minutos", "Questões", "Acertos", "Erros"]]
     tabela_editada = st.data_editor(tabela, use_container_width=True, num_rows="dynamic")
     st.session_state['historico'] = tabela_editada.to_dict('records')
